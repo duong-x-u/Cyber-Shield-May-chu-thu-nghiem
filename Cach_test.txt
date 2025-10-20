@@ -1,0 +1,26 @@
+1. Di chuyển đến URL: "https://cybershield-backend-renderserver.onrender.com/api/analyze"
+2. Dùng tổ hợp phím Ctrl + Shift + I (Hoặc " ≡ >> Công cụ khác >> Công cụ dành cho nhà phát triển")
+3. Chuyển sang tab "Console"
+4. Paste dòng lệnh sau vào trong tab console:
+
+"""
+(async () => {
+  try {
+    const res = await fetch("https://cybershield-backend-renderserver.onrender.com/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: `<Nhập nội dung cần test>`
+      })
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const data = await res.json();
+    console.log("KQ server trả về:", data);
+  } catch (err) {
+    console.error("Lỗi:", err);
+  }
+})();
+"""
+
+5. Thay thế <NHẬP NỘI DUNG CẦN TEST> bằng văn bản của bạn
