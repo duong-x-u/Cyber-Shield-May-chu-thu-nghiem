@@ -142,7 +142,7 @@ Follow strictly the 3-step framework:
 
 async def analyze_with_anna_ai_http(text: str, context_hint: str = None):
     api_key = random.choice(GOOGLE_API_KEYS)
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"    
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}"    
     prompt = create_anna_ai_prompt(text[:3000], context_hint)
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -256,3 +256,4 @@ async def analyze_text():
 async def health_check():
 
     return jsonify({'status': 'Bình thường', 'architecture': 'Trivial Filter + Blacklist (AI) + Context Hints + Anna-AI'})
+
