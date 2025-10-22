@@ -5,8 +5,9 @@ import random
 import gc
 from flask import Blueprint, request, jsonify
 import aiohttp
+from datetime import datetime, timezone, timedelta
 
-# --- Gmail API imports ---
+# --- Google API imports ---
 import base64
 from email.mime.text import MIMEText
 from googleapiclient.discovery import build
@@ -24,10 +25,27 @@ GOOGLE_API_KEYS = [key.strip() for key in GOOGLE_API_KEYS_STR.split(',') if key.
 
 APPS_SCRIPT_URL = os.environ.get('APPS_SCRIPT_URL')
 GMAIL_TOKEN_PATH = os.environ.get('GMAIL_TOKEN_PATH', '/etc/secrets/token.json')
+GOOGLE_SHEET_ID = os.environ.get('GOOGLE_SHEET_ID')
+
+# --- HÀM QUẢN LÝ GOOGLE API CREDENTIALS ---
+def get_google_credentials(scopes):
+    """Lấy credentials cho Google API với các scope cần thiết."""
+    # Kiểm tra xem tệp token có tồn tại không
+    if not os.path.exists(GMAIL_TOKEN_PATH):
+        print(f"🔴 [Google API] Lỗi: Không tìm thấy tệp token tại '{GMAIL_TOKEN_PATH}'")
+        return None
+    try:
+        return Credentials.from_authorized_user_file(GMAIL_TOKEN_PATH, scopes)
+    except Exception as e:
+        print(f"🔴 [Google API] Lỗi khi tải credentials: {e}")
+        return None
 
 # --- HÀM GỬI EMAIL QUA GMAIL API ---
 def send_email_gmail_api(to_email, subject, body):
-    creds = Credentials.from_authorized_user_file(GMAIL_TOKEN_PATH, ['https://www.googleapis.com/auth/gmail.send'])
+    creds = get_google_credentials(['https://www.googleapis.com/auth/gmail.send'])
+    if not creds:
+        print("🔴 [Email] Không thể gửi email do lỗi credentials.")
+        return
     service = build('gmail', 'v1', credentials=creds)
     message = MIMEText(body)
     message['to'] = to_email
@@ -35,6 +53,56 @@ def send_email_gmail_api(to_email, subject, body):
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     result = service.users().messages().send(userId='me', body={'raw': raw}).execute()
     return result
+
+# --- HÀM LƯU VÀO GOOGLE SHEETS ---
+async def save_to_history_sheet_async(text: str, result: dict):
+    """Lưu kết quả phân tích vào Google Sheet một cách bất đồng bộ."""
+    print("➡️ [Sheet] Bắt đầu quá trình lưu lịch sử...")
+    if not GOOGLE_SHEET_ID:
+        print("🔴 [Sheet] Lỗi: Biến môi trường GOOGLE_SHEET_ID chưa được thiết lập.")
+        return
+
+    creds = get_google_credentials(['https://www.googleapis.com/auth/spreadsheets'])
+    if not creds:
+        print("🔴 [Sheet] Không thể lưu vào Sheet do lỗi credentials.")
+        return
+
+    try:
+        service = build('sheets', 'v4', credentials=creds)
+        
+        # Lấy thời gian hiện tại, múi giờ Việt Nam (UTC+7)
+        vn_timezone = timezone(timedelta(hours=7))
+        timestamp = datetime.now(vn_timezone).strftime('%Y-%m-%d %H:%M:%S')
+
+        # Chuẩn bị dữ liệu hàng
+        row_data = [
+            timestamp,
+            text,
+            result.get('is_dangerous', False),
+            result.get('types', 'N/A'),
+            result.get('reason', 'N/A'),
+            result.get('score', 0),
+            result.get('recommend', 'N/A')
+        ]
+
+        body = {
+            'values': [row_data]
+        }
+        
+        # Gửi yêu cầu append
+        sheet_result = service.spreadsheets().values().append(
+            spreadsheetId=GOOGLE_SHEET_ID,
+            range='History!A2', # Ghi vào sheet 'History', bắt đầu từ cột A
+            valueInputOption='USER_ENTERED',
+            insertDataOption='INSERT_ROWS',
+            body=body
+        ).execute()
+        
+        print(f"✅ [Sheet] Đã lưu thành công vào Google Sheet: {sheet_result.get('updates').get('updatedRange')}")
+
+    except Exception as e:
+        print(f"🔴 [Sheet] Lỗi khi đang lưu vào Google Sheet: {e}")
+
 
 # --- HÀM HỖ TRỢ KIỂM TRA URL ---
 async def check_urls_safety_optimized(urls: list):
@@ -239,14 +307,29 @@ async def analyze_text():
     try:
         data = request.get_json(silent=True)
         if not data or 'text' not in data: return jsonify({'error': 'Định dạng yêu cầu không hợp lệ'}), 400
+        
         text = data.get('text', '').strip()
+        urls = data.get('urls', [])
+        
         print(f"--------------------\n📬 [Đầu vào] Nhận được tin nhắn: '{text[:1000]}...'")
         if not text: return jsonify({'error': 'Không có văn bản để phân tích'}), 400
-        result = await perform_full_analysis(text[:3000], data.get('urls', []))
+        
+        # Thực hiện phân tích
+        result = await perform_full_analysis(text[:3000], urls)
+        
+        # Xử lý lỗi
         if 'error' in result:
             return jsonify({'error': result.get('message', 'Lỗi không xác định')}), result.get('status_code', 500)
-        print("✅ [Phản hồi] Đã gửi kết quả về cho client.")
-        return jsonify({'result': result})
+        
+        # Gửi phản hồi cho client ngay lập tức
+        response = jsonify({'result': result})
+        
+        # Sau khi có phản hồi, tạo một tác vụ nền để lưu vào sheet
+        asyncio.create_task(save_to_history_sheet_async(text, result))
+        
+        print("✅ [Phản hồi] Đã gửi kết quả về cho client. Tác vụ lưu nền đã được lên lịch.")
+        return response
+        
     except Exception as e:
         print(f"🔴 [LỖI NGHIÊM TRỌNG] Lỗi server trong hàm analyze_text: {e}")
         gc.collect()
@@ -256,4 +339,3 @@ async def analyze_text():
 async def health_check():
 
     return jsonify({'status': 'Bình thường', 'architecture': 'Trivial Filter + Blacklist (AI) + Context Hints + Anna-AI'})
-
