@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Gmail API token path từ biến môi trường
-GMAIL_TOKEN_PATH = os.getenv('GMAIL_TOKEN_PATH', '/etc/secrets/token.json')
+GMAIL_TOKEN_PATH = os.environ.get('GMAIL_TOKEN_PATH')
 
 # Hàm gửi email bằng Gmail API (cần dùng ở api/analyze.py)
 def send_email_gmail_api(to, subject, body):
@@ -45,20 +45,7 @@ app.register_blueprint(webhook_blueprint, url_prefix='/messenger')
 
 @app.route('/')
 def home():
-    #"""Home endpoint - cyberpunk gaming vibe"""
-    #return jsonify({
-    #    'banner': '⚡ WELCOME TO ARENA OF CYBERSHIELD ⚡',
-    #    'status': '🟢 Sẵn Sàng',
-    #    'version': '1.0.0',
-    #    'server': '0xCyb3r-Sh13ld',
-    #    'message': [
-    #        "Chào mừng đến với Server của Cyber Shield",
-    #        "Kẻ địch sẽ xuất trận sau 5 giây"
-    #    ]
-    #})
     return render_template('index.html')
-
-
 
 @app.route('/health')
 def health_check():
